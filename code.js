@@ -21,9 +21,7 @@ function doGet(e) {
     result = { ok: false, error: err.message, action };
   }
 
-  return ContentService
-  .createTextOutput(JSON.stringify(result))
-  .setMimeType(ContentService.MimeType.JSON);
+  return jsonResponse_(result, p.callback);
 }
 
 function health_() {
@@ -201,4 +199,17 @@ function nextId_(sh, prefix) {
   return prefix + String(max + 1).padStart(4, "0");
 }
 
+function jsonResponse_(data, callback) {
+  const json = JSON.stringify(data);
+  const safeCallback = String(callback || "").replace(/[^\w.$]/g, "");
 
+  if (safeCallback) {
+    return ContentService
+      .createTextOutput(`${safeCallback}(${json});`)
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+
+  return ContentService
+    .createTextOutput(json)
+    .setMimeType(ContentService.MimeType.JSON);
+}

@@ -1,24 +1,33 @@
 # Diagnóstico de conexión - Lista de Compras de Blanca
 
+## Corrección definitiva de arquitectura
+
+Fetch fue descartado porque desde GitHub Pages Apps Script puede redirigir a `script.googleusercontent.com` y devolver 404. Se vuelve a JSONP para comunicación con Apps Script porque evita CORS y permite cargar datos desde una web externa.
+
+La app ya no espera Apps Script para pintar la pantalla. Primero carga `localStorage` si existe; si no existe, carga un catálogo semilla embebido en `app.js`. Después sincroniza con Apps Script en segundo plano. Si Apps Script responde, actualiza productos, categorías y lista reales, guarda caché y vuelve a renderizar. Si Apps Script falla, la app sigue usable con datos guardados o catálogo semilla.
+
+Esto permite que la app sea usable en menos de 2 segundos incluso en GitHub Pages, incógnito, celular nuevo o sin conexión.
+
 ## Corrección conceptual importante
 
-El caché no debe ser la fuente principal de datos. El primer intento de carga debe ir siempre contra Apps Script/Google Sheets. El caché solo se usa si la conexión real falla. Esto evita que un dispositivo viejo parezca funcionar mientras un dispositivo nuevo no puede cargar nada.
+El caché no debe ocultar una falla silenciosa de Apps Script. La pantalla inicial debe ser usable de inmediato con caché o catálogo semilla, y la sincronización real debe ocurrir en segundo plano. Si la base responde, esos datos reales reemplazan los datos locales.
 
 ## Flujo correcto de arranque
 
 1. Abrir app.
-2. Intentar `action=sync` contra Apps Script.
-3. Si responde bien, cargar base real y guardar caché.
-4. Si falla, buscar caché local.
-5. Si hay caché, mostrar datos guardados con aviso.
-6. Si no hay caché, mostrar error claro.
+2. Cargar datos rápidos desde `localStorage`.
+3. Si no hay `localStorage`, cargar catálogo semilla embebido.
+4. Renderizar la app inmediatamente.
+5. Intentar `action=sync` contra Apps Script en segundo plano.
+6. Si responde bien, cargar base real, guardar caché y renderizar otra vez.
+7. Si falla, mantener la app usable y mostrar aviso discreto.
 
 ## Qué estaba mal antes
 
-- Se leía caché primero.
-- Eso aceleraba la app, pero podía ocultar que Apps Script fallaba.
-- En celulares nuevos sin caché, la app quedaba vacía.
-- Por eso ahora se obliga a probar base primero.
+- La app dependía de Apps Script para mostrar productos reales al iniciar.
+- Si Apps Script tardaba, redirigía o fallaba, GitHub Pages podía quedar sin productos.
+- El uso de `fetch` produjo errores por redirecciones a `script.googleusercontent.com`.
+- Por eso ahora la primera pantalla sale de caché o catálogo semilla, y Apps Script sincroniza después.
 
 ## Prueba definitiva
 
@@ -29,7 +38,7 @@ El caché no debe ser la fuente principal de datos. El primer intento de carga d
   `[SYNC] API_URL`
   `[SYNC] JSONP request action sync`
   `[SYNC] sync ok`
-- Si no aparece sync ok, todavía no está solucionado.
+- Si no aparece sync ok, la app debe seguir usable con datos guardados o catálogo semilla.
 
 ## Estado actual observado
 

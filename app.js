@@ -3,6 +3,49 @@ const WHATSAPP_URL = "https://wa.me/5493424307388?text=";
 const CACHE_KEY = "lista_compras_blanca_cache_v1";
 const DEBUG_SYNC = new URLSearchParams(window.location.search).get("debug") === "1";
 
+const SEED_CATEGORIAS = [
+  { IDCategoria: "CAT001_A", "Nombre Categoría": "Verduras" },
+  { IDCategoria: "CAT002_A", "Nombre Categoría": "Frutas" },
+  { IDCategoria: "CAT003_A", "Nombre Categoría": "Granja" },
+  { IDCategoria: "CAT004_A", "Nombre Categoría": "Panadería" },
+  { IDCategoria: "CAT005_A", "Nombre Categoría": "Carnicería" },
+  { IDCategoria: "CAT006_A", "Nombre Categoría": "Congelados" },
+  { IDCategoria: "CAT007_A", "Nombre Categoría": "Despensa" },
+  { IDCategoria: "CAT008_A", "Nombre Categoría": "Limpieza" },
+  { IDCategoria: "CAT009_A", "Nombre Categoría": "Lácteos" },
+  { IDCategoria: "CAT010_A", "Nombre Categoría": "Bebidas" }
+];
+
+const SEED_PRODUCTOS = [
+  { IDProducto: "Pro001", "Nombre Producto": "Acelga", "Categoría": "CAT001_A" },
+  { IDProducto: "Pro002", "Nombre Producto": "Ajo", "Categoría": "CAT001_A" },
+  { IDProducto: "Pro003", "Nombre Producto": "Cebolla", "Categoría": "CAT001_A" },
+  { IDProducto: "Pro004", "Nombre Producto": "Lechuga", "Categoría": "CAT001_A" },
+  { IDProducto: "Pro005", "Nombre Producto": "Papa", "Categoría": "CAT001_A" },
+  { IDProducto: "Pro006", "Nombre Producto": "Tomate", "Categoría": "CAT001_A" },
+  { IDProducto: "Pro007", "Nombre Producto": "Zanahoria", "Categoría": "CAT001_A" },
+  { IDProducto: "Pro008", "Nombre Producto": "Banana", "Categoría": "CAT002_A" },
+  { IDProducto: "Pro009", "Nombre Producto": "Manzana", "Categoría": "CAT002_A" },
+  { IDProducto: "Pro010", "Nombre Producto": "Naranja", "Categoría": "CAT002_A" },
+  { IDProducto: "Pro011", "Nombre Producto": "Huevos", "Categoría": "CAT003_A" },
+  { IDProducto: "Pro012", "Nombre Producto": "Pan", "Categoría": "CAT004_A" },
+  { IDProducto: "Pro013", "Nombre Producto": "Facturas", "Categoría": "CAT004_A" },
+  { IDProducto: "Pro014", "Nombre Producto": "Carne Picada Especial", "Categoría": "CAT005_A" },
+  { IDProducto: "Pro015", "Nombre Producto": "Milanesas de Pollo", "Categoría": "CAT005_A" },
+  { IDProducto: "Pro016", "Nombre Producto": "Hamburguesas", "Categoría": "CAT006_A" },
+  { IDProducto: "Pro017", "Nombre Producto": "Aceite de Cocina", "Categoría": "CAT007_A" },
+  { IDProducto: "Pro018", "Nombre Producto": "Arroz", "Categoría": "CAT007_A" },
+  { IDProducto: "Pro019", "Nombre Producto": "Fideos", "Categoría": "CAT007_A" },
+  { IDProducto: "Pro020", "Nombre Producto": "Galletas de salvado", "Categoría": "CAT007_A" },
+  { IDProducto: "Pro021", "Nombre Producto": "Detergente", "Categoría": "CAT008_A" },
+  { IDProducto: "Pro022", "Nombre Producto": "Lavandina", "Categoría": "CAT008_A" },
+  { IDProducto: "Pro023", "Nombre Producto": "Leche", "Categoría": "CAT009_A" },
+  { IDProducto: "Pro024", "Nombre Producto": "Queso Cremoso", "Categoría": "CAT009_A" },
+  { IDProducto: "Pro025", "Nombre Producto": "Yogur", "Categoría": "CAT009_A" },
+  { IDProducto: "Pro026", "Nombre Producto": "Agua", "Categoría": "CAT010_A" },
+  { IDProducto: "Pro027", "Nombre Producto": "Soda", "Categoría": "CAT010_A" }
+];
+
 let productos = [];
 let categorias = [];
 let lista = [];
@@ -38,7 +81,7 @@ function crearErrorConexion(code, message, details) {
 
 
 
-async function requestBackend(params) {
+async function requestBackendDesactivado(params) {
 
   const requestParams = {
     ...params,
@@ -47,14 +90,14 @@ async function requestBackend(params) {
 
   const url = API_URL + "?" + new URLSearchParams(requestParams).toString();
 
-  debugSync("FETCH", {
+  debugSync("JSONP_DESACTIVADO", {
     action: params.action,
     url
   });
 
   try {
 
-    const response = await fetch(url, {
+    const response = await jsonpNoUsado(url, {
       method: "GET",
       mode: "cors",
       credentials: "omit",
@@ -63,7 +106,7 @@ async function requestBackend(params) {
 
     if (!response.ok) {
       throw crearErrorConexion(
-        "HTTP_" + response.status,
+        "BACKEND_HTTP_" + response.status,
         "HTTP " + response.status
       );
     }
@@ -86,7 +129,7 @@ async function requestBackend(params) {
       throw err;
     }
 
-    debugSync("FETCH OK", {
+    debugSync("JSONP_DESACTIVADO_OK", {
       action: params.action,
       data
     });
@@ -95,7 +138,7 @@ async function requestBackend(params) {
 
   } catch (err) {
 
-    console.error("[SYNC] FETCH ERROR", {
+    console.error("[SYNC] JSONP_DESACTIVADO_ERROR", {
       action: params.action,
       code: err.code,
       message: err.message
@@ -103,6 +146,69 @@ async function requestBackend(params) {
 
     throw err;
   }
+}
+
+function jsonp(params) {
+  return new Promise((resolve, reject) => {
+    const callback = "jsonp_cb_" + Date.now() + "_" + Math.floor(Math.random() * 1000000);
+    const script = document.createElement("script");
+    let terminado = false;
+
+    const timeout = setTimeout(() => {
+      const error = crearErrorConexion("TIMEOUT", "El callback JSONP no respondio a tiempo", { action: params.action });
+      console.warn("[SYNC]", "JSONP timeout", { action: params.action, timeoutMs: 5000 });
+      cleanup();
+      reject(error);
+    }, 5000);
+
+    const requestParams = {
+      ...params,
+      callback,
+      _ts: Date.now()
+    };
+
+    function cleanup() {
+      if (terminado) return;
+      terminado = true;
+      clearTimeout(timeout);
+      if (script.parentNode) script.parentNode.removeChild(script);
+      delete window[callback];
+    }
+
+    window[callback] = data => {
+      cleanup();
+
+      if (!data) {
+        reject(crearErrorConexion("EMPTY_RESPONSE", "Apps Script devolvio una respuesta vacia", { action: params.action }));
+        return;
+      }
+
+      if (data.ok === false) {
+        const error = crearErrorConexion("BACKEND_ERROR", data.error || "Apps Script respondio ok:false", { action: params.action });
+        error.response = data;
+        reject(error);
+        return;
+      }
+
+      debugSync("JSONP ok", { action: params.action, data });
+      resolve(data);
+    };
+
+    script.onerror = () => {
+      const error = crearErrorConexion("JSONP_ERROR", "No se pudo cargar el script JSONP", { action: params.action, url: script.src });
+      console.error("[SYNC]", "JSONP script.onerror", { action: params.action, url: script.src });
+      cleanup();
+      reject(error);
+    };
+
+    script.src = API_URL + "?" + new URLSearchParams(requestParams).toString();
+    debugSync("JSONP request action " + params.action, { url: script.src });
+    document.body.appendChild(script);
+  });
+}
+
+async function requestBackend(params) {
+  return await jsonp(params);
 }
 
 function campo(obj, nombres) {
@@ -191,7 +297,6 @@ function leerCache() {
     productos = Array.isArray(cache.productos) ? cache.productos : [];
     categorias = Array.isArray(cache.categorias) ? cache.categorias : [];
     lista = Array.isArray(cache.lista) ? cache.lista : [];
-    renderTodo();
     debugSync("Cargo desde cache", {
       productos: productos.length,
       categorias: categorias.length,
@@ -203,6 +308,20 @@ function leerCache() {
     console.warn("[SYNC]", "No se pudo leer cache local", err);
     return false;
   }
+}
+
+function cargarDatosInicialesRapidos() {
+  if (leerCache()) return "cache";
+
+  productos = SEED_PRODUCTOS.slice();
+  categorias = SEED_CATEGORIAS.slice();
+  lista = [];
+  debugSync("Cargo catalogo semilla", {
+    productos: productos.length,
+    categorias: categorias.length,
+    lista: lista.length
+  });
+  return "seed";
 }
 
 function guardarCache() {
@@ -345,6 +464,22 @@ function mostrarErrorSinBase(err) {
   estadoProductos.textContent = "Sin conexión con la base";
   estadoResumen.textContent = "Sin conexión con la base";
   actualizarContadores();
+}
+
+async function sincronizarEnSegundoPlano() {
+  try {
+    estadoProductos.textContent = "Sincronizando...";
+    await sincronizarDatosDesdeBase();
+    mostrarMensaje("Base actualizada.");
+    if (DEBUG_SYNC) probarConexionAppsScript();
+  } catch (err) {
+    console.warn("[SYNC] No se pudo actualizar en segundo plano", {
+      code: err.code,
+      message: err.message,
+      response: err.response
+    });
+    mostrarMensaje("No se pudo actualizar la base. Usando datos guardados.");
+  }
 }
 
 function renderTodo() {
@@ -697,31 +832,17 @@ async function limpiarItemsComprados() {
 
 async function iniciarApp() {
   debugSync("API_URL", API_URL);
-  let primerError = null;
 
-  renderEstadoInicialCargando();
+  const origenInicial = cargarDatosInicialesRapidos();
+  renderTodo();
 
-  try {
-    await sincronizarDatosDesdeBase();
-    if (DEBUG_SYNC) probarConexionAppsScript();
-    return;
-  } catch (err) {
-    primerError = err;
-    console.error("[SYNC] Primer sync fallo", {
-      code: err.code,
-      message: err.message,
-      response: err.response,
-      fetchCode: err.fetchCode
-    });
+  if (origenInicial === "cache") {
+    mostrarMensaje("Datos guardados. Sincronizando...");
+  } else if (origenInicial === "seed") {
+    mostrarMensaje("Catálogo inicial cargado. Sincronizando...");
   }
 
-  const hayCache = leerCache();
-  if (hayCache) {
-    mostrarMensaje("Sin conexión con la base. Mostrando datos guardados.");
-    return;
-  }
-
-  mostrarErrorSinBase(primerError || crearErrorConexion("CONNECTION_ERROR", "No se pudo conectar con la base"));
+  sincronizarEnSegundoPlano();
 }
 
 buscar.addEventListener("input", renderProductos);
