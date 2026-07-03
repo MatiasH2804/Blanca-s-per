@@ -1,4 +1,4 @@
-const API_URL = "https://script.google.com/macros/s/AKfycbwhzueRJNZhLN0xDCeK3qkLVaL74bHVodm01DuWIKXjrT_1wyxICHBj0nxyRWGraRXW/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycby1cZ8ujyp0nMBfq8Uwo6tE5dDoAmRcTKkRNOsnfvNT9AfSGP0U4UgStfxqwxerjolG/exec";
 const WHATSAPP_URL = "https://wa.me/5493424307388?text=";
 const CACHE_KEY = "lista_compras_blanca_cache_v1";
 const DEBUG_SYNC = new URLSearchParams(window.location.search).get("debug") === "1";
