@@ -1,4 +1,4 @@
-const API_URL = "https://script.google.com/macros/s/AKfycbwDDnELrn8H2izZ7DvOjfaeys5FtgPRkmwvMweBn5gtE_8dI_AU2YWXalDyUE8r2CU/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbwWbOlfs3upXPvy3PZcvXzaIucGzSLCp-DF97xPyCIP93QBJzDSsQ0ceBN-kJrQg1oP/exec";
 const WHATSAPP_URL = "https://wa.me/5493424307388?text=";
 const CACHE_KEY = "lista_compras_blanca_cache_v1";
 const DEBUG_SYNC = new URLSearchParams(window.location.search).get("debug") === "1";
@@ -29,15 +29,21 @@ function debugSync(...args) {
   if (DEBUG_SYNC) console.log("[SYNC]", ...args);
 }
 
+function crearErrorConexion(code, message, details) {
+  const error = new Error(message || code);
+  error.code = code;
+  if (details) error.details = details;
+  return error;
+}
+
 function jsonp(params) {
   return new Promise((resolve, reject) => {
-    const callback = "cb_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
+    const callback = "jsonp_cb_" + Date.now() + "_" + Math.floor(Math.random() * 1000000);
     const script = document.createElement("script");
     let terminado = false;
     const timeout = setTimeout(() => {
-      const error = new Error("timeout");
-      error.code = "timeout";
-      console.warn("[SYNC]", "Timeout esperando Apps Script", { action: params.action, timeoutMs: 30000 });
+      const error = crearErrorConexion("TIMEOUT", "El callback JSONP no respondio a tiempo", { action: params.action });
+      console.warn("[SYNC]", "JSONP timeout", { action: params.action, timeoutMs: 30000 });
       cleanup();
       reject(error);
     }, 30000);
@@ -60,38 +66,94 @@ function jsonp(params) {
       cleanup();
 
       if (!data) {
-        const error = new Error("empty_response");
-        error.code = "empty_response";
-        console.warn("[SYNC]", "Apps Script devolvio una respuesta vacia", { action: params.action });
-        reject(error);
+        console.warn("[SYNC]", "JSONP respuesta vacia", { action: params.action });
+        reject(crearErrorConexion("EMPTY_RESPONSE", "Apps Script devolvio una respuesta vacia", { action: params.action }));
         return;
       }
 
       if (data.ok === false) {
-        const error = new Error(data.error || "backend_error");
-        error.code = "backend_error";
+        const error = crearErrorConexion("BACKEND_ERROR", data.error || "Apps Script respondio ok:false", { action: params.action });
         error.response = data;
-        console.warn("[SYNC]", "Apps Script respondio ok:false", { action: params.action, data });
+        console.warn("[SYNC]", "JSONP backend ok:false", { action: params.action, data });
         reject(error);
         return;
       }
 
-      debugSync("Respuesta OK", { action: params.action, data });
+      debugSync("JSONP ok", { action: params.action, data });
       resolve(data);
     };
 
     script.onerror = () => {
-      const error = new Error("script_error");
-      error.code = "script_error";
-      console.error("[SYNC]", "No se pudo cargar el script JSONP", { action: params.action, url: script.src });
+      const error = crearErrorConexion("JSONP_ERROR", "No se pudo cargar el script JSONP", { action: params.action, url: script.src });
+      console.error("[SYNC]", "JSONP script.onerror", { action: params.action, url: script.src });
       cleanup();
       reject(error);
     };
 
     script.src = API_URL + "?" + new URLSearchParams(requestParams).toString();
-    debugSync("Request JSONP", { action: params.action, url: script.src });
+    debugSync("JSONP request action " + params.action, { url: script.src });
     document.body.appendChild(script);
   });
+}
+
+async function requestBackend(params) {
+  const requestParams = {
+    ...params,
+    _ts: Date.now()
+  };
+  let jsonpError;
+
+  try {
+    return await jsonp(requestParams);
+  } catch (err) {
+    jsonpError = err;
+    console.warn("[SYNC]", "JSONP fallo, probando fetch de diagnostico", {
+      action: params.action,
+      code: err.code,
+      message: err.message
+    });
+  }
+
+  try {
+    const url = API_URL + "?" + new URLSearchParams(requestParams).toString();
+    debugSync("fetch request", { action: params.action, url });
+    const response = await fetch(url, {
+      method: "GET",
+      mode: "cors",
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      throw crearErrorConexion("FETCH_HTTP_ERROR", "Fetch respondio con HTTP " + response.status, { status: response.status });
+    }
+
+    const data = await response.json();
+    if (!data) {
+      throw crearErrorConexion("EMPTY_RESPONSE", "Fetch devolvio una respuesta vacia");
+    }
+
+    if (data.ok === false) {
+      const error = crearErrorConexion("BACKEND_ERROR", data.error || "Apps Script respondio ok:false por fetch");
+      error.response = data;
+      throw error;
+    }
+
+    console.warn("[SYNC]", "JSONP fallo pero fetch funciono", { action: params.action });
+    debugSync("fetch ok", { action: params.action, data });
+    return data;
+  } catch (fetchErr) {
+    console.warn("[SYNC]", "fetch diagnostico fallo", {
+      action: params.action,
+      code: fetchErr.code || "CORS_FETCH_ERROR",
+      message: fetchErr.message
+    });
+    if (fetchErr.code && fetchErr.code !== "CORS_FETCH_ERROR") {
+      throw fetchErr;
+    }
+    jsonpError.fetchCode = fetchErr.code || "CORS_FETCH_ERROR";
+    jsonpError.fetchMessage = fetchErr.message;
+    throw jsonpError;
+  }
 }
 
 function campo(obj, nombres) {
@@ -181,7 +243,6 @@ function leerCache() {
     categorias = Array.isArray(cache.categorias) ? cache.categorias : [];
     lista = Array.isArray(cache.lista) ? cache.lista : [];
     renderTodo();
-    mostrarMensaje("Datos guardados. Actualizando...");
     debugSync("Cargo desde cache", {
       productos: productos.length,
       categorias: categorias.length,
@@ -210,7 +271,7 @@ function guardarCache() {
 
 async function probarConexionAppsScript() {
   try {
-    const data = await jsonp({ action: "health" });
+    const data = await requestBackend({ action: "health" });
     debugSync("Resultado health", data);
     console.log("[SYNC]", "Apps Script conectado correctamente");
     return true;
@@ -248,19 +309,7 @@ async function sincronizarDatos({ mostrarCarga = false, mantenerCache = true } =
       productosDiv.innerHTML = `<div class="vacio">Cargando productos...</div>`;
     }
 
-    const data = await jsonp({ action: "sync" });
-    productos = data.productos || [];
-    categorias = data.categorias || [];
-    lista = data.lista || [];
-    debugSync("Resultado sync", {
-      serverTime: data.serverTime,
-      counts: data.counts,
-      productos: productos.length,
-      categorias: categorias.length,
-      lista: lista.length
-    });
-    guardarCache();
-    renderTodo();
+    await sincronizarDatosDesdeBase();
   } catch (err) {
     if (mantenerCache && (productos.length || categorias.length || lista.length)) {
       console.warn("[SYNC]", "Fallo sync, se mantiene cache", { code: err.code, message: err.message });
@@ -274,15 +323,79 @@ async function sincronizarDatos({ mostrarCarga = false, mantenerCache = true } =
     categorias = [];
     lista = [];
     renderCategorias();
-    productosDiv.innerHTML = `<div class="error">No se pudo conectar con la base de datos. Revisá internet o avisale a Eduardo.</div>`;
-    listaDiv.innerHTML = `<div class="error">No se pudo conectar con la base de datos. Revisá internet o avisale a Eduardo.</div>`;
-    resumenPedido.innerHTML = `<div class="error">No se pudo conectar con la base de datos. Revisá internet o avisale a Eduardo.</div>`;
+    const codigo = escapeHtml(err.code || "CONNECTION_ERROR");
+    const mensajeError = `<div class="error">No se pudo conectar con la base. Avisale a Eduardo.<br><small>Código: ${codigo}</small></div>`;
+    productosDiv.innerHTML = mensajeError;
+    listaDiv.innerHTML = mensajeError;
+    resumenPedido.innerHTML = mensajeError;
     estadoProductos.textContent = "Sin conexión con la base";
     estadoResumen.textContent = "Sin conexión con la base";
   } finally {
     cargando = false;
     actualizarContadores();
   }
+}
+
+function renderEstadoInicialCargando() {
+  productos = [];
+  categorias = [];
+  lista = [];
+  renderCategorias();
+  productosDiv.innerHTML = `<div class="vacio">Conectando con la base de datos...</div>`;
+  listaDiv.innerHTML = `<div class="vacio">Conectando con la base de datos...</div>`;
+  resumenPedido.innerHTML = `<div class="vacio">Conectando con la base de datos...</div>`;
+  estadoProductos.textContent = "Conectando...";
+  estadoResumen.textContent = "Conectando...";
+  actualizarContadores();
+}
+
+async function sincronizarDatosDesdeBase() {
+  const data = await requestBackend({ action: "sync" });
+
+  if (!data) {
+    throw crearErrorConexion("EMPTY_RESPONSE", "Sync devolvio una respuesta vacia");
+  }
+
+  if (!Array.isArray(data.productos)) {
+    throw crearErrorConexion("INVALID_SYNC", "Sync no devolvio productos como array", { data });
+  }
+
+  if (!Array.isArray(data.categorias)) {
+    throw crearErrorConexion("INVALID_SYNC", "Sync no devolvio categorias como array", { data });
+  }
+
+  if (data.lista && !Array.isArray(data.lista)) {
+    throw crearErrorConexion("INVALID_SYNC", "Sync no devolvio lista como array", { data });
+  }
+
+  productos = data.productos;
+  categorias = data.categorias;
+  lista = data.lista || [];
+  debugSync("sync ok", {
+    serverTime: data.serverTime,
+    counts: data.counts,
+    productos: productos.length,
+    categorias: categorias.length,
+    lista: lista.length
+  });
+  guardarCache();
+  renderTodo();
+}
+
+function mostrarErrorSinBase(err) {
+  const codigo = escapeHtml(err.code || "CONNECTION_ERROR");
+  const mensajeError = `<div class="error">No se pudo conectar con la base. Avisale a Eduardo.<br><small>Código: ${codigo}</small></div>`;
+
+  productos = [];
+  categorias = [];
+  lista = [];
+  renderCategorias();
+  productosDiv.innerHTML = mensajeError;
+  listaDiv.innerHTML = mensajeError;
+  resumenPedido.innerHTML = mensajeError;
+  estadoProductos.textContent = "Sin conexión con la base";
+  estadoResumen.textContent = "Sin conexión con la base";
+  actualizarContadores();
 }
 
 function renderTodo() {
@@ -572,7 +685,7 @@ async function agregarProducto(info) {
       lista = [...lista, temporal];
       activarVista("listaView");
     },
-    accion: () => jsonp({
+    accion: () => requestBackend({
       action: "add",
       idProducto: info.idProducto,
       producto: info.nombreProducto,
@@ -586,7 +699,7 @@ async function cambiarCantidad(id, cantidad) {
 
   await ejecutarAccion({
     optimista: () => actualizarItemLocal(id, { Cantidad: nuevaCantidad }),
-    accion: () => jsonp({
+    accion: () => requestBackend({
       action: "updateCantidad",
       id,
       cantidad: nuevaCantidad
@@ -597,7 +710,7 @@ async function cambiarCantidad(id, cantidad) {
 async function cambiarComprado(id, comprado) {
   await ejecutarAccion({
     optimista: () => actualizarItemLocal(id, { Comprado: comprado }),
-    accion: () => jsonp({
+    accion: () => requestBackend({
       action: "updateComprado",
       id,
       comprado
@@ -610,7 +723,7 @@ async function borrarItem(id) {
     optimista: () => {
       lista = lista.filter(item => String(item.IDCompra) !== String(id));
     },
-    accion: () => jsonp({
+    accion: () => requestBackend({
       action: "delete",
       id
     })
@@ -627,7 +740,7 @@ async function limpiarItemsComprados() {
     },
     accion: async () => {
       for (const item of comprados) {
-        await jsonp({ action: "delete", id: item.IDCompra });
+        await requestBackend({ action: "delete", id: item.IDCompra });
       }
     }
   });
@@ -635,17 +748,31 @@ async function limpiarItemsComprados() {
 
 async function iniciarApp() {
   debugSync("API_URL", API_URL);
-  const hayCache = leerCache();
+  let primerError = null;
 
-  if (!hayCache) {
-    renderTodo();
-    probarConexionAppsScript();
-    await sincronizarDatos({ mostrarCarga: true, mantenerCache: false });
+  renderEstadoInicialCargando();
+
+  try {
+    await sincronizarDatosDesdeBase();
+    if (DEBUG_SYNC) probarConexionAppsScript();
+    return;
+  } catch (err) {
+    primerError = err;
+    console.error("[SYNC] Primer sync fallo", {
+      code: err.code,
+      message: err.message,
+      response: err.response,
+      fetchCode: err.fetchCode
+    });
+  }
+
+  const hayCache = leerCache();
+  if (hayCache) {
+    mostrarMensaje("Sin conexión con la base. Mostrando datos guardados.");
     return;
   }
 
-  probarConexionAppsScript();
-  sincronizarDatos({ mostrarCarga: false, mantenerCache: true });
+  mostrarErrorSinBase(primerError || crearErrorConexion("CONNECTION_ERROR", "No se pudo conectar con la base"));
 }
 
 buscar.addEventListener("input", renderProductos);

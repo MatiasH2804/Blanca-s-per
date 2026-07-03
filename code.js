@@ -25,20 +25,33 @@ function doGet(e) {
 }
 
 function health_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
   return {
     ok: true,
     status: "online",
     app: "Lista de Compras de Blanca",
     timestamp: new Date().toISOString(),
+    spreadsheetId: ss.getId(),
     sheets: {
-      lista: hasSheet_(CONFIG.SHEET_LISTA),
-      productos: hasSheet_(CONFIG.SHEET_PRODUCTOS),
-      categorias: hasSheet_(CONFIG.SHEET_CATEGORIAS)
+      lista: !!ss.getSheetByName(CONFIG.SHEET_LISTA),
+      productos: !!ss.getSheetByName(CONFIG.SHEET_PRODUCTOS),
+      categorias: !!ss.getSheetByName(CONFIG.SHEET_CATEGORIAS)
     }
   };
 }
 
 function syncData_() {
+  const missing = missingSheets_();
+  if (missing.length) {
+    return {
+      ok: false,
+      error: "No se encontraron hojas en Google Sheets: " + missing.join(", "),
+      missingSheets: missing,
+      serverTime: new Date().toISOString()
+    };
+  }
+
   const productos = getObjects_(CONFIG.SHEET_PRODUCTOS).filter(r => r.IDProducto);
   const categorias = getObjects_(CONFIG.SHEET_CATEGORIAS).filter(r => r.IDCategoria);
   const lista = getObjects_(CONFIG.SHEET_LISTA).filter(r => r.IDCompra && r.Producto);
@@ -120,11 +133,22 @@ function deleteItem_(p) {
 }
 
 function hasSheet_(name) {
-  return Boolean(SpreadsheetApp.getActive().getSheetByName(name));
+  return Boolean(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name));
+}
+
+function missingSheets_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const missing = [];
+
+  if (!ss.getSheetByName(CONFIG.SHEET_LISTA)) missing.push(CONFIG.SHEET_LISTA);
+  if (!ss.getSheetByName(CONFIG.SHEET_PRODUCTOS)) missing.push(CONFIG.SHEET_PRODUCTOS);
+  if (!ss.getSheetByName(CONFIG.SHEET_CATEGORIAS)) missing.push(CONFIG.SHEET_CATEGORIAS);
+
+  return missing;
 }
 
 function getSheet_(name) {
-  const sh = SpreadsheetApp.getActive().getSheetByName(name);
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
   if (!sh) throw new Error("No existe la hoja: " + name);
   return sh;
 }
@@ -177,14 +201,15 @@ function nextId_(sh, prefix) {
 
 function jsonp_(data, callback) {
   const json = JSON.stringify(data);
-  const validCallback = String(callback || "").trim();
-  const hasValidCallback = /^[A-Za-z_$][0-9A-Za-z_$]*(\.[A-Za-z_$][0-9A-Za-z_$]*)*$/.test(validCallback);
-  const output = hasValidCallback ? `${validCallback}(${json})` : json;
-  const mimeType = hasValidCallback
-    ? ContentService.MimeType.JAVASCRIPT
-    : ContentService.MimeType.JSON;
+  const safeCallback = String(callback || "").replace(/[^\w.$]/g, "");
+
+  if (safeCallback) {
+    return ContentService
+      .createTextOutput(`${safeCallback}(${json});`)
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
 
   return ContentService
-    .createTextOutput(output)
-    .setMimeType(mimeType);
+    .createTextOutput(json)
+    .setMimeType(ContentService.MimeType.JSON);
 }
