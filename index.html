@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lista de Compras de Blanca</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="header">
+      <div>
+        <h1>Lista de Compras</h1>
+      </div>
+    </header>
+
+    <nav class="tabs" aria-label="Secciones">
+      <button class="tab active" type="button" data-view="productosView">Productos</button>
+      <button class="tab" type="button" data-view="listaView">Mi lista</button>
+      <button class="tab" type="button" data-view="resumenView">Resumen</button>
+    </nav>
+
+    <section id="productosView" class="view active">
+      <div class="toolbar" aria-label="Buscar y filtrar productos">
+        <label class="field">
+          <span>Buscar producto</span>
+          <input id="buscar" class="input" type="search" placeholder="Ej: leche, pan, banana" autocomplete="off" />
+        </label>
+
+        <label class="field">
+          <span>Categoría</span>
+          <select id="categoria" class="input">
+            <option value="">Todas las categorías</option>
+          </select>
+        </label>
+      </div>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Productos</h2>
+          <p id="estadoProductos">Cargando productos...</p>
+        </div>
+        <div id="productos" class="grid productos-grid" aria-live="polite"></div>
+      </section>
+    </section>
+
+    <section id="listaView" class="view">
+      <section class="section">
+        <div class="section-title">
+          <h2>Mi lista</h2>
+          <div class="list-actions">
+            <button id="limpiarComprados" class="btn btn-light" type="button">Limpiar comprados</button>
+          </div>
+        </div>
+        <div id="lista" class="grid lista-grid" aria-live="polite"></div>
+      </section>
+    </section>
+
+    <section id="resumenView" class="view">
+      <section class="section resumen-section">
+        <div class="section-title">
+          <h2>Resumen de compra</h2>
+          <p id="estadoResumen">Pedido actual</p>
+        </div>
+        <div id="resumenPedido" class="resumen-body" aria-live="polite"></div>
+        <button id="finalizarPedido" class="btn btn-finalizar full-button" type="button">Finalizar pedido</button>
+      </section>
+    </section>
+  </main>
+
+  <div id="mensajeApp" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
