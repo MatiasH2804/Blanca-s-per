@@ -1,4 +1,4 @@
-const API_URL = "https://script.google.com/macros/s/AKfycbwWbOlfs3upXPvy3PZcvXzaIucGzSLCp-DF97xPyCIP93QBJzDSsQ0ceBN-kJrQg1oP/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbwhzueRJNZhLN0xDCeK3qkLVaL74bHVodm01DuWIKXjrT_1wyxICHBj0nxyRWGraRXW/exec";
 const WHATSAPP_URL = "https://wa.me/5493424307388?text=";
 const CACHE_KEY = "lista_compras_blanca_cache_v1";
 const DEBUG_SYNC = new URLSearchParams(window.location.search).get("debug") === "1";
@@ -36,123 +36,72 @@ function crearErrorConexion(code, message, details) {
   return error;
 }
 
-function jsonp(params) {
-  return new Promise((resolve, reject) => {
-    const callback = "jsonp_cb_" + Date.now() + "_" + Math.floor(Math.random() * 1000000);
-    const script = document.createElement("script");
-    let terminado = false;
-    const timeout = setTimeout(() => {
-      const error = crearErrorConexion("TIMEOUT", "El callback JSONP no respondio a tiempo", { action: params.action });
-      console.warn("[SYNC]", "JSONP timeout", { action: params.action, timeoutMs: 30000 });
-      cleanup();
-      reject(error);
-    }, 30000);
 
-    const requestParams = {
-      ...params,
-      callback,
-      _ts: Date.now()
-    };
-
-    function cleanup() {
-      if (terminado) return;
-      terminado = true;
-      clearTimeout(timeout);
-      if (script.parentNode) script.parentNode.removeChild(script);
-      delete window[callback];
-    }
-
-    window[callback] = data => {
-      cleanup();
-
-      if (!data) {
-        console.warn("[SYNC]", "JSONP respuesta vacia", { action: params.action });
-        reject(crearErrorConexion("EMPTY_RESPONSE", "Apps Script devolvio una respuesta vacia", { action: params.action }));
-        return;
-      }
-
-      if (data.ok === false) {
-        const error = crearErrorConexion("BACKEND_ERROR", data.error || "Apps Script respondio ok:false", { action: params.action });
-        error.response = data;
-        console.warn("[SYNC]", "JSONP backend ok:false", { action: params.action, data });
-        reject(error);
-        return;
-      }
-
-      debugSync("JSONP ok", { action: params.action, data });
-      resolve(data);
-    };
-
-    script.onerror = () => {
-      const error = crearErrorConexion("JSONP_ERROR", "No se pudo cargar el script JSONP", { action: params.action, url: script.src });
-      console.error("[SYNC]", "JSONP script.onerror", { action: params.action, url: script.src });
-      cleanup();
-      reject(error);
-    };
-
-    script.src = API_URL + "?" + new URLSearchParams(requestParams).toString();
-    debugSync("JSONP request action " + params.action, { url: script.src });
-    document.body.appendChild(script);
-  });
-}
 
 async function requestBackend(params) {
+
   const requestParams = {
     ...params,
     _ts: Date.now()
   };
-  let jsonpError;
+
+  const url = API_URL + "?" + new URLSearchParams(requestParams).toString();
+
+  debugSync("FETCH", {
+    action: params.action,
+    url
+  });
 
   try {
-    return await jsonp(requestParams);
-  } catch (err) {
-    jsonpError = err;
-    console.warn("[SYNC]", "JSONP fallo, probando fetch de diagnostico", {
-      action: params.action,
-      code: err.code,
-      message: err.message
-    });
-  }
 
-  try {
-    const url = API_URL + "?" + new URLSearchParams(requestParams).toString();
-    debugSync("fetch request", { action: params.action, url });
     const response = await fetch(url, {
       method: "GET",
       mode: "cors",
+      credentials: "omit",
       cache: "no-store"
     });
 
     if (!response.ok) {
-      throw crearErrorConexion("FETCH_HTTP_ERROR", "Fetch respondio con HTTP " + response.status, { status: response.status });
+      throw crearErrorConexion(
+        "HTTP_" + response.status,
+        "HTTP " + response.status
+      );
     }
 
     const data = await response.json();
+
     if (!data) {
-      throw crearErrorConexion("EMPTY_RESPONSE", "Fetch devolvio una respuesta vacia");
+      throw crearErrorConexion(
+        "EMPTY_RESPONSE",
+        "Respuesta vacía"
+      );
     }
 
     if (data.ok === false) {
-      const error = crearErrorConexion("BACKEND_ERROR", data.error || "Apps Script respondio ok:false por fetch");
-      error.response = data;
-      throw error;
+      const err = crearErrorConexion(
+        "BACKEND_ERROR",
+        data.error || "Backend error"
+      );
+      err.response = data;
+      throw err;
     }
 
-    console.warn("[SYNC]", "JSONP fallo pero fetch funciono", { action: params.action });
-    debugSync("fetch ok", { action: params.action, data });
-    return data;
-  } catch (fetchErr) {
-    console.warn("[SYNC]", "fetch diagnostico fallo", {
+    debugSync("FETCH OK", {
       action: params.action,
-      code: fetchErr.code || "CORS_FETCH_ERROR",
-      message: fetchErr.message
+      data
     });
-    if (fetchErr.code && fetchErr.code !== "CORS_FETCH_ERROR") {
-      throw fetchErr;
-    }
-    jsonpError.fetchCode = fetchErr.code || "CORS_FETCH_ERROR";
-    jsonpError.fetchMessage = fetchErr.message;
-    throw jsonpError;
+
+    return data;
+
+  } catch (err) {
+
+    console.error("[SYNC] FETCH ERROR", {
+      action: params.action,
+      code: err.code,
+      message: err.message
+    });
+
+    throw err;
   }
 }
 
