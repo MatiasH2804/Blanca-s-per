@@ -1,4 +1,4 @@
-const API_URL = "https://script.google.com/macros/s/AKfycby1cZ8ujyp0nMBfq8Uwo6tE5dDoAmRcTKkRNOsnfvNT9AfSGP0U4UgStfxqwxerjolG/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbyD98q075uflW72jgJyeW2hEDBIEyLrnuPWUyZLxo8zbFklqnMWY-EpFA2DE-hTI7nR/exec";
 const WHATSAPP_URL = "https://wa.me/5493424307388?text=";
 const CACHE_KEY = "lista_compras_blanca_cache_v1";
 const DEBUG_SYNC = new URLSearchParams(window.location.search).get("debug") === "1";
@@ -79,73 +79,12 @@ function crearErrorConexion(code, message, details) {
   return error;
 }
 
-
-
-async function requestBackendDesactivado(params) {
-
-  const requestParams = {
-    ...params,
+function getJsonpTestUrl(action = "sync") {
+  return API_URL + "?" + new URLSearchParams({
+    action,
+    callback: "prueba",
     _ts: Date.now()
-  };
-
-  const url = API_URL + "?" + new URLSearchParams(requestParams).toString();
-
-  debugSync("JSONP_DESACTIVADO", {
-    action: params.action,
-    url
-  });
-
-  try {
-
-    const response = await jsonpNoUsado(url, {
-      method: "GET",
-      mode: "cors",
-      credentials: "omit",
-      cache: "no-store"
-    });
-
-    if (!response.ok) {
-      throw crearErrorConexion(
-        "BACKEND_HTTP_" + response.status,
-        "HTTP " + response.status
-      );
-    }
-
-    const data = await response.json();
-
-    if (!data) {
-      throw crearErrorConexion(
-        "EMPTY_RESPONSE",
-        "Respuesta vacía"
-      );
-    }
-
-    if (data.ok === false) {
-      const err = crearErrorConexion(
-        "BACKEND_ERROR",
-        data.error || "Backend error"
-      );
-      err.response = data;
-      throw err;
-    }
-
-    debugSync("JSONP_DESACTIVADO_OK", {
-      action: params.action,
-      data
-    });
-
-    return data;
-
-  } catch (err) {
-
-    console.error("[SYNC] JSONP_DESACTIVADO_ERROR", {
-      action: params.action,
-      code: err.code,
-      message: err.message
-    });
-
-    throw err;
-  }
+  }).toString();
 }
 
 function jsonp(params) {
@@ -154,18 +93,21 @@ function jsonp(params) {
     const script = document.createElement("script");
     let terminado = false;
 
-    const timeout = setTimeout(() => {
-      const error = crearErrorConexion("TIMEOUT", "El callback JSONP no respondio a tiempo", { action: params.action });
-      console.warn("[SYNC]", "JSONP timeout", { action: params.action, timeoutMs: 5000 });
-      cleanup();
-      reject(error);
-    }, 5000);
-
     const requestParams = {
       ...params,
       callback,
       _ts: Date.now()
     };
+
+    const url = API_URL + "?" + new URLSearchParams(requestParams).toString();
+    debugSync("JSONP request action " + params.action, { url });
+
+    const timeout = setTimeout(() => {
+      const error = crearErrorConexion("TIMEOUT", "El callback JSONP no respondió a tiempo", { action: params.action, url });
+      console.warn("[SYNC]", "JSONP timeout", { action: params.action, url, timeoutMs: 15000 });
+      cleanup();
+      reject(error);
+    }, 15000);
 
     function cleanup() {
       if (terminado) return;
@@ -179,12 +121,12 @@ function jsonp(params) {
       cleanup();
 
       if (!data) {
-        reject(crearErrorConexion("EMPTY_RESPONSE", "Apps Script devolvio una respuesta vacia", { action: params.action }));
+        reject(crearErrorConexion("EMPTY_RESPONSE", "Apps Script devolvió una respuesta vacía", { action: params.action, url }));
         return;
       }
 
       if (data.ok === false) {
-        const error = crearErrorConexion("BACKEND_ERROR", data.error || "Apps Script respondio ok:false", { action: params.action });
+        const error = crearErrorConexion("BACKEND_ERROR", data.error || "Apps Script respondió ok:false", { action: params.action, url });
         error.response = data;
         reject(error);
         return;
@@ -195,14 +137,19 @@ function jsonp(params) {
     };
 
     script.onerror = () => {
-      const error = crearErrorConexion("JSONP_ERROR", "No se pudo cargar el script JSONP", { action: params.action, url: script.src });
-      console.error("[SYNC]", "JSONP script.onerror", { action: params.action, url: script.src });
+      const error = crearErrorConexion("JSONP_ERROR", "No se pudo cargar el script JSONP", { action: params.action, url });
+      console.error("[SYNC]", "JSONP script.onerror", { action: params.action, url });
+      console.error(
+        "[SYNC]",
+        "ERROR JSONP: Apps Script no está respondiendo como JavaScript cargable. Probar manualmente: " +
+          getJsonpTestUrl(params.action || "sync") +
+          ". Debe devolver prueba({...}); Si no lo hace, revisar deployment de Apps Script: Ejecutar como Yo / Acceso Cualquier persona / Nueva versión implementada."
+      );
       cleanup();
       reject(error);
     };
 
-    script.src = API_URL + "?" + new URLSearchParams(requestParams).toString();
-    debugSync("JSONP request action " + params.action, { url: script.src });
+    script.src = url;
     document.body.appendChild(script);
   });
 }
@@ -243,7 +190,7 @@ function cantidadItem(item) {
 function getCategoriaNombre(idCategoria) {
   const id = limpiarTexto(idCategoria);
   const categoriaEncontrada = categorias.find(cat => limpiarTexto(campo(cat, ["IDCategoria"])) === id);
-  return limpiarTexto(campo(categoriaEncontrada, ["Nombre Categoría", "Nombre Categoria", "Nombre CategorÃ­a", "Nombre CategorÃƒÂ­a", "Nombre CategorÃƒÆ’Ã‚Â­a"])) || "Sin categoría";
+  return limpiarTexto(campo(categoriaEncontrada, ["Nombre Categoría", "Nombre Categoria", "Nombre CategorÃ­a"])) || "Sin categoría";
 }
 
 function getProductoInfo(item) {
@@ -263,7 +210,7 @@ function getProductoInfo(item) {
   const idProducto = limpiarTexto(campo(producto, ["IDProducto"])) || idProductoDirecto;
   const nombreResuelto = limpiarTexto(campo(producto, ["Nombre Producto", "NombreProducto"]));
   const nombreProducto = nombreResuelto || (pareceIdVisible(valorProducto) ? "Producto sin nombre" : valorProducto) || "Producto sin nombre";
-  const idCategoria = limpiarTexto(campo(producto, ["Categoría", "Categoria", "CategorÃ­a", "CategorÃƒÂ­a", "CategorÃƒÆ’Ã‚Â­a"]));
+  const idCategoria = limpiarTexto(campo(producto, ["Categoría", "Categoria", "CategorÃ­a"]));
   const nombreCategoria = getCategoriaNombre(idCategoria);
 
   return { idProducto, nombreProducto, idCategoria, nombreCategoria };
@@ -340,15 +287,10 @@ function guardarCache() {
 async function probarConexionAppsScript() {
   try {
     const data = await requestBackend({ action: "health" });
-    debugSync("Resultado health", data);
-    console.log("[SYNC]", "Apps Script conectado correctamente");
+    console.log("[SYNC] health ok", data);
     return true;
   } catch (err) {
-    console.warn("[SYNC]", "Fallo health de Apps Script", {
-      code: err.code,
-      message: err.message,
-      response: err.response
-    });
+    console.warn("[SYNC] health error", { code: err.code, message: err.message, response: err.response });
     return false;
   }
 }
@@ -386,54 +328,30 @@ async function sincronizarDatos({ mostrarCarga = false, mantenerCache = true } =
       return;
     }
 
-    console.error("[SYNC]", "Fallo sync sin cache disponible", { code: err.code, message: err.message, response: err.response });
-    productos = [];
-    categorias = [];
-    lista = [];
-    renderCategorias();
-    const codigo = escapeHtml(err.code || "CONNECTION_ERROR");
-    const mensajeError = `<div class="error">No se pudo conectar con la base. Avisale a Eduardo.<br><small>Código: ${codigo}</small></div>`;
-    productosDiv.innerHTML = mensajeError;
-    listaDiv.innerHTML = mensajeError;
-    resumenPedido.innerHTML = mensajeError;
-    estadoProductos.textContent = "Sin conexión con la base";
-    estadoResumen.textContent = "Sin conexión con la base";
+    mostrarErrorSinBase(err);
   } finally {
     cargando = false;
     actualizarContadores();
   }
 }
 
-function renderEstadoInicialCargando() {
-  productos = [];
-  categorias = [];
-  lista = [];
-  renderCategorias();
-  productosDiv.innerHTML = `<div class="vacio">Conectando con la base de datos...</div>`;
-  listaDiv.innerHTML = `<div class="vacio">Conectando con la base de datos...</div>`;
-  resumenPedido.innerHTML = `<div class="vacio">Conectando con la base de datos...</div>`;
-  estadoProductos.textContent = "Conectando...";
-  estadoResumen.textContent = "Conectando...";
-  actualizarContadores();
-}
-
 async function sincronizarDatosDesdeBase() {
   const data = await requestBackend({ action: "sync" });
 
   if (!data) {
-    throw crearErrorConexion("EMPTY_RESPONSE", "Sync devolvio una respuesta vacia");
+    throw crearErrorConexion("EMPTY_RESPONSE", "Sync devolvió una respuesta vacía");
   }
 
   if (!Array.isArray(data.productos)) {
-    throw crearErrorConexion("INVALID_SYNC", "Sync no devolvio productos como array", { data });
+    throw crearErrorConexion("INVALID_SYNC", "Sync no devolvió productos como array", { data });
   }
 
   if (!Array.isArray(data.categorias)) {
-    throw crearErrorConexion("INVALID_SYNC", "Sync no devolvio categorias como array", { data });
+    throw crearErrorConexion("INVALID_SYNC", "Sync no devolvió categorias como array", { data });
   }
 
   if (data.lista && !Array.isArray(data.lista)) {
-    throw crearErrorConexion("INVALID_SYNC", "Sync no devolvio lista como array", { data });
+    throw crearErrorConexion("INVALID_SYNC", "Sync no devolvió lista como array", { data });
   }
 
   productos = data.productos;
@@ -470,6 +388,7 @@ async function sincronizarEnSegundoPlano() {
   try {
     estadoProductos.textContent = "Sincronizando...";
     await sincronizarDatosDesdeBase();
+    console.log("[SYNC] Base actualizada");
     mostrarMensaje("Base actualizada.");
     if (DEBUG_SYNC) probarConexionAppsScript();
   } catch (err) {
@@ -478,7 +397,11 @@ async function sincronizarEnSegundoPlano() {
       message: err.message,
       response: err.response
     });
-    mostrarMensaje("No se pudo actualizar la base. Usando datos guardados.");
+    if (err.code === "JSONP_ERROR" || err.code === "TIMEOUT") {
+      mostrarMensaje("No se pudo sincronizar. Revisar Apps Script.");
+    } else {
+      mostrarMensaje("No se pudo actualizar la base. Usando datos guardados.");
+    }
   }
 }
 
@@ -496,7 +419,7 @@ function renderCategorias() {
 
   categorias.forEach(cat => {
     const id = limpiarTexto(campo(cat, ["IDCategoria"]));
-    const nombre = limpiarTexto(campo(cat, ["Nombre Categoría", "Nombre Categoria", "Nombre CategorÃ­a", "Nombre CategorÃƒÂ­a", "Nombre CategorÃƒÆ’Ã‚Â­a"]));
+    const nombre = limpiarTexto(campo(cat, ["Nombre Categoría", "Nombre Categoria", "Nombre CategorÃ­a"]));
     if (!id || !nombre) return;
 
     const option = document.createElement("option");
@@ -736,7 +659,7 @@ function actualizarItemLocal(id, cambios) {
   lista = lista.map(item => String(item.IDCompra) === String(id) ? { ...item, ...cambios } : item);
 }
 
-async function ejecutarAccion({ accion, optimista }) {
+async function ejecutarAccion({ accion, optimista, actionName }) {
   const anterior = snapshotEstado();
 
   try {
@@ -752,6 +675,9 @@ async function ejecutarAccion({ accion, optimista }) {
     restaurarEstado(anterior);
     guardarCache();
     console.warn("[SYNC]", "No se pudo sincronizar operación", { code: err.code, message: err.message });
+    if (actionName) {
+      console.warn("[SYNC]", "Falló escritura. Revisar URL JSONP manual: " + getJsonpTestUrl(actionName));
+    }
     mostrarMensaje("No se pudo sincronizar. Revisá internet.");
   }
 }
@@ -774,7 +700,8 @@ async function agregarProducto(info) {
       idProducto: info.idProducto,
       producto: info.nombreProducto,
       cantidad: 1
-    })
+    }),
+    actionName: "add"
   });
 }
 
@@ -787,7 +714,8 @@ async function cambiarCantidad(id, cantidad) {
       action: "updateCantidad",
       id,
       cantidad: nuevaCantidad
-    })
+    }),
+    actionName: "updateCantidad"
   });
 }
 
@@ -798,7 +726,8 @@ async function cambiarComprado(id, comprado) {
       action: "updateComprado",
       id,
       comprado
-    })
+    }),
+    actionName: "updateComprado"
   });
 }
 
@@ -810,7 +739,8 @@ async function borrarItem(id) {
     accion: () => requestBackend({
       action: "delete",
       id
-    })
+    }),
+    actionName: "delete"
   });
 }
 
@@ -826,12 +756,17 @@ async function limpiarItemsComprados() {
       for (const item of comprados) {
         await requestBackend({ action: "delete", id: item.IDCompra });
       }
-    }
+    },
+    actionName: "delete"
   });
 }
 
 async function iniciarApp() {
-  debugSync("API_URL", API_URL);
+  debugSync("API_URL actual:", API_URL);
+  if (DEBUG_SYNC) {
+    console.log("[SYNC] URL test JSONP sync:", getJsonpTestUrl("sync"));
+    console.log("[SYNC] URL test JSONP health:", getJsonpTestUrl("health"));
+  }
 
   const origenInicial = cargarDatosInicialesRapidos();
   renderTodo();

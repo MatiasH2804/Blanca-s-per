@@ -1,141 +1,142 @@
 # Diagnóstico de conexión - Lista de Compras de Blanca
 
-## Corrección definitiva de arquitectura
+## IMPORTANTE
 
-Fetch fue descartado porque desde GitHub Pages Apps Script puede redirigir a `script.googleusercontent.com` y devolver 404. Se vuelve a JSONP para comunicación con Apps Script porque evita CORS y permite cargar datos desde una web externa.
+`Code.gs` no se sube a GitHub.
 
-La app ya no espera Apps Script para pintar la pantalla. Primero carga `localStorage` si existe; si no existe, carga un catálogo semilla embebido en `app.js`. Después sincroniza con Apps Script en segundo plano. Si Apps Script responde, actualiza productos, categorías y lista reales, guarda caché y vuelve a renderizar. Si Apps Script falla, la app sigue usable con datos guardados o catálogo semilla.
+El backend vive solo en Apps Script y se pega manualmente allí. El repositorio público debe contener solo archivos frontend como `index.html`, `app.js`, `styles.css` y documentación.
 
-Esto permite que la app sea usable en menos de 2 segundos incluso en GitHub Pages, incógnito, celular nuevo o sin conexión.
+Si JSONP falla, probar manualmente:
 
-## Corrección conceptual importante
+```text
+API_URL?action=sync&callback=prueba
+```
 
-El caché no debe ocultar una falla silenciosa de Apps Script. La pantalla inicial debe ser usable de inmediato con caché o catálogo semilla, y la sincronización real debe ocurrir en segundo plano. Si la base responde, esos datos reales reemplazan los datos locales.
+Debe devolver:
 
-## Flujo correcto de arranque
+```js
+prueba({...});
+```
 
-1. Abrir app.
-2. Cargar datos rápidos desde `localStorage`.
-3. Si no hay `localStorage`, cargar catálogo semilla embebido.
-4. Renderizar la app inmediatamente.
-5. Intentar `action=sync` contra Apps Script en segundo plano.
-6. Si responde bien, cargar base real, guardar caché y renderizar otra vez.
-7. Si falla, mantener la app usable y mostrar aviso discreto.
+Si no devuelve eso:
 
-## Qué estaba mal antes
+- Apps Script no fue desplegado con nueva versión.
+- O el acceso no está en "Cualquier persona".
+- O `API_URL` apunta a una implementación vieja/incorrecta.
 
-- La app dependía de Apps Script para mostrar productos reales al iniciar.
-- Si Apps Script tardaba, redirigía o fallaba, GitHub Pages podía quedar sin productos.
-- El uso de `fetch` produjo errores por redirecciones a `script.googleusercontent.com`.
-- Por eso ahora la primera pantalla sale de caché o catálogo semilla, y Apps Script sincroniza después.
+## Arquitectura final
 
-## Prueba definitiva
+Fetch fue descartado para esta app porque desde GitHub Pages Apps Script puede redirigir a `script.googleusercontent.com` y fallar con 404 o bloqueos de CORS.
 
-- Abrir GitHub Pages en incógnito.
-- Abrir en un celular donde nunca se haya abierto.
-- Agregar `?debug=1`.
-- Debe verse en consola:
-  `[SYNC] API_URL`
-  `[SYNC] JSONP request action sync`
-  `[SYNC] sync ok`
-- Si no aparece sync ok, la app debe seguir usable con datos guardados o catálogo semilla.
+JSONP queda como método oficial de sincronización con Apps Script.
 
-## Estado actual observado
+La app no espera Apps Script para pintar la pantalla:
 
-- La URL de Apps Script con `action=sync` responde manualmente en navegador y devuelve productos.
-- Sin embargo, desde GitHub Pages o desde un dispositivo nuevo la app muestra "Sin conexión con la base".
-- Por lo tanto, el problema no parece ser que la Sheet esté vacía ni que Apps Script sea inaccesible en navegador.
-- El foco de corrección está en la capa de transporte frontend/backend: JSONP, callback, timeout, fallback fetch, health y despliegue actualizado.
+1. Carga `localStorage` si existe.
+2. Si no hay caché, carga `SEED_PRODUCTOS` y `SEED_CATEGORIAS` embebidos en `app.js`.
+3. Renderiza Productos / Mi lista / Resumen inmediatamente.
+4. Sincroniza con Apps Script en segundo plano usando JSONP.
+5. Si Apps Script responde, actualiza productos, categorías y lista reales, guarda caché y vuelve a renderizar.
+6. Si Apps Script falla, la app sigue usable con datos guardados o catálogo semilla.
 
-## Problema observado
+## Requisito JSONP
 
-Desde dispositivos que ya tienen caché local, la app puede parecer que funciona aunque no esté conectando correctamente con Apps Script. En un celular nuevo, una computadora nueva, GitHub Pages o una ventana de incógnito, no existe caché previo y la app necesita cargar la base desde Google Sheets mediante Apps Script.
+Para que JSONP funcione, `Code.gs` debe devolver JavaScript válido cuando recibe `callback`.
 
-Si esa conexión falla, aparecen mensajes como "No se pudo conectar" o la app no carga productos.
+Con callback:
 
-## Posibles causas
+```js
+prueba({"ok":true});
+```
 
-- Apps Script no publicado como aplicación web accesible para "Cualquier usuario".
-- URL vieja de implementación en `API_URL`.
-- Apps Script tarda más que el timeout configurado.
-- JSONP bloqueado por error de script.
-- El callback JSONP no se ejecuta aunque la URL responda manualmente.
-- El backend devuelve JSON puro cuando el frontend esperaba JavaScript JSONP.
-- El backend devuelve `ok:false`.
-- Hojas con nombres incorrectos.
-- Caché local ocultando el problema real en dispositivos donde la app ya se abrió antes.
+Sin callback:
 
-## Solución nueva aplicada
+```json
+{"ok":true}
+```
 
-- Se creó `requestBackend()`.
-- `requestBackend()` intenta primero JSONP robusto.
-- Si JSONP falla, intenta `fetch` normal con `mode: "cors"` y `cache: "no-store"` como fallback/diagnóstico.
-- Todas las acciones (`sync`, `health`, `add`, `updateCantidad`, `updateComprado`, `delete`) pasan por `requestBackend()`.
-- JSONP ahora usa callback global único, `_ts`, timeout de 30000 ms y limpieza segura.
-- Los errores tienen códigos simples: `TIMEOUT`, `JSONP_ERROR`, `BACKEND_ERROR`, `EMPTY_RESPONSE`, `CORS_FETCH_ERROR`.
-- Se agregó `health` real en Apps Script con `spreadsheetId` y estado de hojas.
-- Apps Script usa `SpreadsheetApp.getActiveSpreadsheet()`.
-- `jsonp_()` sanitiza el callback y devuelve JavaScript válido cuando hay callback.
-- `syncData_()` devuelve `serverTime`, `counts` y error claro si no se encuentra una hoja.
+La función responsable es:
 
-## Solución aplicada
+```js
+jsonResponse_(data, callback)
+```
 
-- Se agregó `action=health` / `action=ping` para diagnosticar Apps Script sin modificar datos.
-- Se aumentó el timeout de JSONP a 30000 ms.
-- Se agregó parámetro anti-cache `_ts` en cada request.
-- Se agregaron logs técnicos con prefijo `[SYNC]`.
-- `sync` ahora devuelve `serverTime` y conteos de productos, categorías y lista.
-- Al abrir, la app intenta primero `action=sync` contra Apps Script.
-- Si `sync` funciona, carga la base real y recién después guarda caché actualizado.
-- Si falla la conexión con caché disponible, muestra datos guardados como respaldo.
-- Si falla la conexión sin caché, muestra un mensaje claro con código simple para avisar a Eduardo.
+## Pruebas de Apps Script
 
-## Cómo probar
+Abrir en navegador:
 
-1. Abrir la URL de Apps Script con:
-   `?action=health`
-2. Abrir la URL de Apps Script con:
-   `?action=sync`
-3. Abrir GitHub Pages en incógnito.
-4. Abrir desde un celular con datos móviles.
-5. Abrir la app con:
-   `?debug=1`
-6. Limpiar `localStorage` y probar otra vez.
+```text
+API_URL?action=health
+```
 
-## Pruebas obligatorias después de subir
+Debe devolver JSON normal con `ok:true`.
 
-1. Abrir:
-   `API_URL?action=health`
-   Debe devolver `ok:true`.
+Abrir:
 
-2. Abrir:
-   `API_URL?action=sync`
-   Debe devolver `productos`, `categorias` y `lista`.
+```text
+API_URL?action=health&callback=prueba
+```
 
-3. Abrir GitHub Pages en incógnito con:
-   `?debug=1`
+Debe devolver JavaScript:
 
-4. En consola debe verse:
-   `[SYNC] API_URL`
-   `[SYNC] JSONP request`
-   `[SYNC] sync ok` o `fetch ok` si el fallback fue necesario.
+```js
+prueba({"ok":true,...});
+```
 
-5. En un celular nuevo debe cargar productos sin caché previo.
+Abrir:
+
+```text
+API_URL?action=sync&callback=prueba
+```
+
+Debe devolver:
+
+```js
+prueba({"ok":true,"serverTime":"...","productos":[...],"categorias":[...],"lista":[...]});
+```
+
+Si la URL con `callback=prueba` devuelve JSON puro en vez de `prueba({...});`, el Apps Script publicado no tiene el `Code.gs` actualizado o no se desplegó una nueva versión.
+
+## Pruebas en GitHub Pages
+
+Abrir:
+
+```text
+https://matiash2804.github.io/Blanca-s-per/?debug=1
+```
+
+Resultado esperado:
+
+- En menos de 2 segundos se ven productos desde caché o catálogo semilla.
+- En consola aparece `[SYNC] API_URL actual`.
+- En consola aparece `[SYNC] JSONP request action sync`.
+- Si Apps Script responde, aparece `[SYNC] sync ok`.
+- Si Apps Script responde, aparece `[SYNC] Base actualizada`.
+- Al agregar producto aparece `[SYNC] JSONP request action add`.
+- Al cambiar cantidad aparece `[SYNC] JSONP request action updateCantidad`.
+- Al marcar comprado aparece `[SYNC] JSONP request action updateComprado`.
+
+No deberían aparecer errores normales de `TIMEOUT` ni `JSONP_ERROR`.
+
+## Publicación obligatoria de Apps Script
+
+Después de cambiar `Code.gs`, no alcanza con guardar el archivo.
+
+Hay que publicar una nueva versión:
+
+1. Apps Script > Implementar.
+2. Administrar implementaciones.
+3. Editar la implementación web.
+4. Seleccionar Nueva versión.
+5. Implementar.
+6. Confirmar que la URL `/exec` sea la misma usada en `API_URL` o copiar la nueva URL si cambió.
 
 ## Resultado esperado
 
-- `health` devuelve `ok:true`.
-- `sync` devuelve `productos`, `categorias` y `lista`.
-- GitHub Pages carga sin caché previo.
-- Un celular nuevo carga productos.
-- Si falla internet, usa caché solo si existe.
-
-## Checklist de publicación de Apps Script
-
-- Implementar > Nueva implementación.
-- Tipo: Aplicación web.
-- Ejecutar como: yo.
-- Quién tiene acceso: cualquier usuario.
-- Copiar URL `/exec` nueva.
-- Pegar esa URL en `API_URL`.
-- Guardar y subir `app.js` a GitHub.
+- La app carga visualmente en menos de 2 segundos.
+- Un celular nuevo ve productos aunque no tenga caché.
+- La sincronización real usa JSONP.
+- Si Apps Script falla, la app sigue usable.
+- Si Apps Script responde, Google Sheets queda sincronizado.
+- No hay mezcla fetch/JSONP.
+- No hay funciones muertas de transporte.
